@@ -5,6 +5,7 @@ import smtplib
 from email.mime.text import MIMEText
 import qrcode
 import os
+
 app = Flask(__name__)
 app.secret_key = "csrams_secret_key"
 
@@ -17,7 +18,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # ======================
-# EMAIL FUNCTION (REAL EMAIL READY)
+# EMAIL FUNCTION
 # ======================
 
 def send_email(to_email, subject, html_message):
@@ -70,10 +71,12 @@ with app.app_context():
         db.session.add(teacher)
         db.session.commit()
 
-# The URL you want to encode
+# ======================
+# QR CODE (ONE-TIME GENERATION)
+# ======================
+
 url = "https://csramsrecruit.onrender.com/"
 
-# Generate QR code
 qr = qrcode.QRCode(
     version=1,
     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -83,17 +86,14 @@ qr = qrcode.QRCode(
 qr.add_data(url)
 qr.make(fit=True)
 
-# Create an image
 img = qr.make_image(fill_color="black", back_color="white")
-
-# Save the image
 img.save("rams_recruit_qr.png")
 
 print("QR code saved as rams_recruit_qr.png")
 
 @app.route("/qrcode")
 def generate_qr():
-    url = "http://127.0.0.1:5000"  # change later when deployed
+    url = "http://127.0.0.1:5000"
 
     img = qrcode.make(url)
 
@@ -102,13 +102,13 @@ def generate_qr():
 
     img.save("static/site_qr.png")
 
-    return f"""
+    return """
     <h2>Scan to Visit RecruitCSRams</h2>
     <img src='/static/site_qr.png' width='300'>
     """
 
 # ======================
-# HOME PAGE (KEEP YOUR RED DESIGN)
+# HOME PAGE
 # ======================
 
 @app.route("/")
@@ -121,14 +121,14 @@ def home():
             body {
                 margin: 0;
                 font-family: Arial, sans-serif;
-background: linear-gradient(
-    rgba(139,0,0,0.85),
-    rgba(139,0,0,0.85)
-), url('/static/campus.jpg');
-
-background-size: cover;
-background-position: center;
-background-attachment: fixed;                color: white;
+                background: linear-gradient(
+                    rgba(139,0,0,0.85),
+                    rgba(139,0,0,0.85)
+                ), url('/static/campus.jpg');
+                background-size: cover;
+                background-position: center;
+                background-attachment: fixed;
+                color: white;
                 text-align: center;
             }
             .container {
@@ -175,7 +175,7 @@ background-attachment: fixed;                color: white;
     <body>
         <div class="container">
 
-            <h1>Computer Science & Information Technology Programs</h1> Trigger redeploy
+            <h1>Computer Science & Information Technology Programs</h1>
             <p><b>Winston-Salem State University</b></p>
             <p>📞 336-750-2485 | ✉️ jonese@wssu.edu</p>
 
@@ -248,7 +248,7 @@ background-attachment: fixed;                color: white;
     """)
 
 # ======================
-# RED STYLE TEMPLATE FOR OTHER PAGES
+# RED STYLE TEMPLATE
 # ======================
 
 def red_style(content):
@@ -304,14 +304,32 @@ def register():
 
     if request.method == "POST":
 
-        existing = Student.query.filter_by(email=request.form["email"]).first()
+        # --- BASIC VALIDATION ---
+        required_fields = ["first_name", "last_name", "email", "phone", "parent_email", "location", "password"]
 
+        for field in required_fields:
+            if not request.form.get(field):
+                return red_style(f"""
+                    <h3>Error: {field.replace('_',' ').title()} is required.</h3>
+                    <a href='/register'>Go Back</a>
+                """)
+
+        # --- EMAIL ALREADY EXISTS ---
+        existing = Student.query.filter_by(email=request.form["email"]).first()
         if existing:
             return red_style("""
-            <h3>Email already registered!</h3>
-            <a href='/student_login'>Login Instead</a>
+                <h3>Email already registered!</h3>
+                <a href='/student_login'>Login Instead</a>
             """)
 
+        # --- PASSWORD LENGTH CHECK ---
+        if len(request.form["password"]) < 6:
+            return red_style("""
+                <h3>Password must be at least 6 characters long.</h3>
+                <a href='/register'>Go Back</a>
+            """)
+
+        # --- CREATE STUDENT ---
         student = Student(
             first_name=request.form["first_name"],
             last_name=request.form["last_name"],
@@ -328,7 +346,6 @@ def register():
 
         return redirect("/student_login")
 
-    # ✅ THIS MUST ALWAYS EXIST (GET request)
     return red_style("""
     <h2>Register</h2>
 
@@ -345,11 +362,13 @@ def register():
         <option>Computer Science</option>
         <option>Information Technology</option>
         <option>Data Science</option>
+        <option>Cybersecurity</option>
     </select><br><br>
 
     <button>Submit</button>
     </form>
     """)
+
 # ======================
 # STUDENT LOGIN
 # ======================
@@ -442,7 +461,7 @@ def login():
     """)
 
 # ======================
-# TEACHER DASHBOARD (UPGRADED)
+# TEACHER DASHBOARD
 # ======================
 
 @app.route("/teacher")
@@ -488,8 +507,29 @@ def teacher():
     <br>
     <a href="/logout">Logout</a>
     """)
+
 # ======================
-# DELETE STUDENT
+# DELETE STUDENT (ADDED)
+# ======================
+
+@app.route("/delete/<int:id>")
+def delete_student(id):
+
+    if "user" not in session:
+        return redirect("/login")
+
+    student = Student.query.get_or_404(id)
+
+    db.session.delete(student)
+    db.session.commit()
+
+    return red_style("""
+        <h3>Student Deleted Successfully</h3>
+        <a href='/teacher'>Back to Dashboard</a>
+    """)
+
+# ======================
+# CONTACT STUDENT/PARENT
 # ======================
 
 @app.route("/contact/<int:id>/<type>", methods=["GET","POST"])
