@@ -53,13 +53,24 @@ class Student(db.Model):
     interest = db.Column(db.String(100))
     location = db.Column(db.String(100))
     password = db.Column(db.String(200))
+    checked_in = db.Column(db.Boolean, default=False)   # event check-in
+    applied = db.Column(db.Boolean, default=False)      # optional: later mark as applicant
 
 class Teacher(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True)
     password = db.Column(db.String(200))
 
-# Create database + default teacher
+class Session(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200))
+
+class Attendance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'))
+    session_id = db.Column(db.Integer, db.ForeignKey('session.id'))
+
+# Create database + default teacher + some default sessions
 with app.app_context():
     db.create_all()
 
@@ -71,29 +82,20 @@ with app.app_context():
         db.session.add(teacher)
         db.session.commit()
 
+    # Default sessions for the Open House
+    default_sessions = ["Welcome & Overview", "Cybersecurity Demo", "AI & Data Science", "Student Panel"]
+    for sname in default_sessions:
+        if not Session.query.filter_by(name=sname).first():
+            db.session.add(Session(name=sname))
+    db.session.commit()
+
 # ======================
-# QR CODE (ONE-TIME GENERATION)
+# STATIC SITE QR (GENERAL)
 # ======================
-
-url = "https://csramsrecruit.onrender.com/"
-
-qr = qrcode.QRCode(
-    version=1,
-    error_correction=qrcode.constants.ERROR_CORRECT_L,
-    box_size=10,
-    border=4,
-)
-qr.add_data(url)
-qr.make(fit=True)
-
-img = qr.make_image(fill_color="black", back_color="white")
-img.save("rams_recruit_qr.png")
-
-print("QR code saved as rams_recruit_qr.png")
 
 @app.route("/qrcode")
 def generate_qr():
-    url = "http://127.0.0.1:5000"
+    url = "https://csramsrecruit.onrender.com/"  # change if needed
 
     img = qrcode.make(url)
 
@@ -169,6 +171,12 @@ def home():
                 text-align: left;
                 display: inline-block;
             }
+
+            @media (max-width: 600px) {
+                h1 { font-size: 2.2em; }
+                .card { width: 90%; }
+                .btn { width: 80%; }
+            }
         </style>
     </head>
 
@@ -176,14 +184,15 @@ def home():
         <div class="container">
 
             <h1>Computer Science & Information Technology Programs</h1>
+            <p style="font-size: 16px; opacity: 0.9; margin-top: 8px;">Explore the Computer Science & IT Program at Winston-Salem State University</p>
             <p><b>Winston-Salem State University</b></p>
             <p>📞 336-750-2485 | ✉️ jonese@wssu.edu</p>
 
             <p>🚀 98% Employment Rate | 💻 Hands-On Learning | 🔐 Cybersecurity</p>
 
-            <a href="/register" class="btn">Apply</a>
+            <a href="/register" class="btn">Apply / Register</a>
             <a href="/student_login" class="btn">Student Login</a>
-            <a href="/login" class="btn">Teacher Login</a>
+            <a href="/login" class="btn">Faculty Login</a>
 
             <div class="section">
                 <div class="card">💡 Innovative Learning</div>
@@ -214,14 +223,6 @@ def home():
                     <h3>Data Analytics Certificate</h3>
                     <p>Great for any major entering tech.</p>
                 </div>
-            </div>
-
-            <div class="section">
-                <h2>Why Choose WSSU?</h2>
-                <div class="card">#1 HBCU in NC</div>
-                <div class="card">#1 for Social Mobility</div>
-                <div class="card">Hands-on Internships</div>
-                <div class="card">Faculty Mentorship</div>
             </div>
 
             <div class="section">
@@ -261,13 +262,16 @@ def red_style(content):
             background: #fff5f5;
             color: #8B0000;
             text-align: center;
+            padding: 20px;
         }}
 
-        input, select {{
+        input, select, textarea {{
             padding: 10px;
             margin: 8px;
             border: 1px solid #8B0000;
             border-radius: 5px;
+            width: 260px;
+            max-width: 90%;
         }}
 
         button {{
@@ -276,16 +280,32 @@ def red_style(content):
             padding: 10px 20px;
             border-radius: 20px;
             border: none;
+            cursor: pointer;
+        }}
+
+        button:hover {{
+            background: #a80000;
         }}
 
         table {{
             margin: auto;
             border-collapse: collapse;
+            width: 95%;
+            max-width: 900px;
         }}
 
         th, td {{
             border: 1px solid #8B0000;
-            padding: 10px;
+            padding: 8px;
+            font-size: 14px;
+        }}
+
+        th {{
+            background: #fbe3e3;
+        }}
+
+        a {{
+            color: #8B0000;
         }}
     </style>
     </head>
@@ -304,32 +324,14 @@ def register():
 
     if request.method == "POST":
 
-        # --- BASIC VALIDATION ---
-        required_fields = ["first_name", "last_name", "email", "phone", "parent_email", "location", "password"]
-
-        for field in required_fields:
-            if not request.form.get(field):
-                return red_style(f"""
-                    <h3>Error: {field.replace('_',' ').title()} is required.</h3>
-                    <a href='/register'>Go Back</a>
-                """)
-
-        # --- EMAIL ALREADY EXISTS ---
         existing = Student.query.filter_by(email=request.form["email"]).first()
+
         if existing:
             return red_style("""
-                <h3>Email already registered!</h3>
-                <a href='/student_login'>Login Instead</a>
+            <h3>Email already registered!</h3>
+            <a href='/student_login'>Login Instead</a>
             """)
 
-        # --- PASSWORD LENGTH CHECK ---
-        if len(request.form["password"]) < 6:
-            return red_style("""
-                <h3>Password must be at least 6 characters long.</h3>
-                <a href='/register'>Go Back</a>
-            """)
-
-        # --- CREATE STUDENT ---
         student = Student(
             first_name=request.form["first_name"],
             last_name=request.form["last_name"],
@@ -344,19 +346,46 @@ def register():
         db.session.add(student)
         db.session.commit()
 
+        # Generate unique QR code for student check-in
+        qr_url = f"https://csramsrecruit.onrender.com/checkin/{student.id}"
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(qr_url)
+        qr.make(fit=True)
+
+        if not os.path.exists("static/qr"):
+            os.makedirs("static/qr")
+
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        qr_img.save(f"static/qr/student_{student.id}.png")
+
+        # Simple automated follow-up email after registration
+        email_body = f"""
+        <h2>Thank you for registering, {student.first_name}!</h2>
+        <p>We’re excited to see you at the CS & IT Open House.</p>
+        <p><b>Interest Area:</b> {student.interest}</p>
+        <p>Bring this email with you and check in using your QR code at the event.</p>
+        """
+        send_email(student.email, "WSSU CS Open House Registration", email_body)
+
         return redirect("/student_login")
 
     return red_style("""
-    <h2>Register</h2>
+    <h2>Open House Registration</h2>
 
     <form method="POST">
-    <input name="first_name" placeholder="First Name"><br>
-    <input name="last_name" placeholder="Last Name"><br>
-    <input name="email" placeholder="Email"><br>
+    <input name="first_name" placeholder="First Name" required><br>
+    <input name="last_name" placeholder="Last Name" required><br>
+    <input name="email" placeholder="Email" type="email" required><br>
     <input name="phone" placeholder="Phone"><br>
-    <input name="parent_email" placeholder="Parent Email"><br>
+    <input name="parent_email" placeholder="Parent Email" type="email"><br>
     <input name="location" placeholder="Location"><br>
-    <input type="password" name="password" placeholder="Password"><br>
+    <input type="password" name="password" placeholder="Password" required><br>
 
     <select name="interest">
         <option>Computer Science</option>
@@ -413,8 +442,13 @@ def student_dashboard():
     }
 
     recommended = course_map.get(student.interest, [])
-
     course_html = "".join([f"<li>{c}</li>" for c in recommended])
+
+    # Simple "schedule" = list of sessions
+    sessions = Session.query.all()
+    session_html = "".join([f"<li>{s.name}</li>" for s in sessions])
+
+    checked_text = "Yes" if student.checked_in else "Not yet"
 
     return red_style(f"""
     <h2>Welcome {student.first_name}</h2>
@@ -422,10 +456,20 @@ def student_dashboard():
     <p><b>Email:</b> {student.email}</p>
     <p><b>Interest:</b> {student.interest}</p>
     <p><b>Location:</b> {student.location}</p>
+    <p><b>Event Check-In:</b> {checked_text}</p>
+
+    <h3>Your Check-In QR Code</h3>
+    <p>Show this at the event to be checked in.</p>
+    <img src="/static/qr/student_{student.id}.png" width="200" alt="Student QR Code">
 
     <h3>Recommended Courses For You</h3>
     <ul>
     {course_html}
+    </ul>
+
+    <h3>Sample Open House Schedule</h3>
+    <ul>
+    {session_html}
     </ul>
 
     <a href="/logout_student">Logout</a>
@@ -435,6 +479,81 @@ def student_dashboard():
 def logout_student():
     session.pop("student", None)
     return redirect("/")
+
+# ======================
+# QR CHECK-IN
+# ======================
+
+@app.route("/checkin/<int:id>")
+def checkin(id):
+    student = Student.query.get_or_404(id)
+    student.checked_in = True
+    db.session.commit()
+
+    return red_style(f"""
+    <h2>Welcome, {student.first_name}!</h2>
+    <p>You are now <b>checked in</b> for the CS Open House.</p>
+    <p>Enjoy the sessions and feel free to ask questions!</p>
+    """)
+
+# ======================
+# SESSION CHECK-IN (PER SESSION)
+# ======================
+
+@app.route("/session_qr/<int:session_id>")
+def session_qr(session_id):
+    """Generate a QR code for a specific session (for admins to print)."""
+    sess = Session.query.get_or_404(session_id)
+    url = f"https://csramsrecruit.onrender.com/session_checkin/{session_id}"
+
+    if not os.path.exists("static/session_qr"):
+        os.makedirs("static/session_qr")
+
+    img = qrcode.make(url)
+    img.save(f"static/session_qr/session_{session_id}.png")
+
+    return red_style(f"""
+    <h2>QR Code for Session: {sess.name}</h2>
+    <img src="/static/session_qr/session_{session_id}.png" width="250" alt="Session QR">
+    """)
+
+@app.route("/session_checkin/<int:session_id>")
+def session_checkin(session_id):
+    """When scanned at a session, student enters email to mark attendance."""
+    sess = Session.query.get_or_404(session_id)
+
+    return red_style(f"""
+    <h2>Session Check-In: {sess.name}</h2>
+    <p>Enter your email to record your attendance.</p>
+    <form method="POST" action="/session_checkin_submit/{session_id}">
+        <input name="email" placeholder="Your Email" type="email" required><br>
+        <button>Check In</button>
+    </form>
+    """)
+
+@app.route("/session_checkin_submit/<int:session_id>", methods=["POST"])
+def session_checkin_submit(session_id):
+    sess = Session.query.get_or_404(session_id)
+    email = request.form["email"]
+    student = Student.query.filter_by(email=email).first()
+
+    if not student:
+        return red_style("""
+        <h3>Email not found.</h3>
+        <p>Please register first or check your spelling.</p>
+        <a href="/">Back to Home</a>
+        """)
+
+    # Record attendance if not already recorded
+    existing = Attendance.query.filter_by(student_id=student.id, session_id=session_id).first()
+    if not existing:
+        db.session.add(Attendance(student_id=student.id, session_id=session_id))
+        db.session.commit()
+
+    return red_style(f"""
+    <h2>Thank you, {student.first_name}!</h2>
+    <p>Your attendance has been recorded for <b>{sess.name}</b>.</p>
+    """)
 
 # ======================
 # TEACHER LOGIN
@@ -461,7 +580,7 @@ def login():
     """)
 
 # ======================
-# TEACHER DASHBOARD
+# TEACHER DASHBOARD WITH ANALYTICS
 # ======================
 
 @app.route("/teacher")
@@ -471,9 +590,32 @@ def teacher():
         return redirect("/login")
 
     students = Student.query.all()
+    total_students = len(students)
+    total_checked_in = Student.query.filter_by(checked_in=True).count()
 
+    # Simple "conversion": checked-in / registered
+    conversion_rate = 0
+    if total_students > 0:
+        conversion_rate = round((total_checked_in / total_students) * 100, 1)
+
+    # Interest breakdown
+    interest_counts = {}
+    for s in students:
+        interest_counts[s.interest] = interest_counts.get(s.interest, 0) + 1
+
+    interest_html = "".join([f"<li>{k}: {v}</li>" for k, v in interest_counts.items()])
+
+    # Session popularity
+    sessions = Session.query.all()
+    session_rows = ""
+    for sess in sessions:
+        count = Attendance.query.filter_by(session_id=sess.id).count()
+        session_rows += f"<tr><td>{sess.name}</td><td>{count}</td><td><a href='/session_qr/{sess.id}'>View QR</a></td></tr>"
+
+    # Student table
     rows = ""
     for s in students:
+        status = "Checked In" if s.checked_in else "Not Checked In"
         rows += f"""
         <tr>
             <td>{s.first_name} {s.last_name}</td>
@@ -481,6 +623,7 @@ def teacher():
             <td>{s.parent_email}</td>
             <td>{s.interest}</td>
             <td>{s.location}</td>
+            <td>{status}</td>
             <td>
                 <a href='/contact/{s.id}/student'>Email Student</a> |
                 <a href='/contact/{s.id}/parent'>Email Parent</a> |
@@ -492,6 +635,27 @@ def teacher():
     return red_style(f"""
     <h2>Teacher Dashboard</h2>
 
+    <h3>Recruitment Analytics</h3>
+    <p><b>Total Registrations:</b> {total_students}</p>
+    <p><b>Total Checked In:</b> {total_checked_in}</p>
+    <p><b>Conversion (Registered → Checked In):</b> {conversion_rate}%</p>
+
+    <h4>Interest Breakdown</h4>
+    <ul>
+        {interest_html}
+    </ul>
+
+    <h4>Session Popularity</h4>
+    <table>
+        <tr>
+            <th>Session</th>
+            <th>Attendance Count</th>
+            <th>QR Code</th>
+        </tr>
+        {session_rows}
+    </table>
+
+    <h3>Registered Students</h3>
     <table>
     <tr>
         <th>Name</th>
@@ -499,6 +663,7 @@ def teacher():
         <th>Parent Email</th>
         <th>Interest</th>
         <th>Location</th>
+        <th>Check-In Status</th>
         <th>Actions</th>
     </tr>
     {rows}
@@ -509,27 +674,7 @@ def teacher():
     """)
 
 # ======================
-# DELETE STUDENT (ADDED)
-# ======================
-
-@app.route("/delete/<int:id>")
-def delete_student(id):
-
-    if "user" not in session:
-        return redirect("/login")
-
-    student = Student.query.get_or_404(id)
-
-    db.session.delete(student)
-    db.session.commit()
-
-    return red_style("""
-        <h3>Student Deleted Successfully</h3>
-        <a href='/teacher'>Back to Dashboard</a>
-    """)
-
-# ======================
-# CONTACT STUDENT/PARENT
+# CONTACT / EMAIL
 # ======================
 
 @app.route("/contact/<int:id>/<type>", methods=["GET","POST"])
@@ -563,6 +708,21 @@ def contact(id, type):
     """)
 
 # ======================
+# DELETE STUDENT
+# ======================
+
+@app.route("/delete/<int:id>")
+def delete(id):
+    if "user" not in session:
+        return redirect("/login")
+
+    student = Student.query.get_or_404(id)
+    db.session.delete(student)
+    db.session.commit()
+
+    return redirect("/teacher")
+
+# ======================
 # LOGOUT
 # ======================
 
@@ -577,3 +737,4 @@ def logout():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
